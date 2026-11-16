@@ -40,6 +40,10 @@ idCVar idVertexCache::r_vertexBufferMegs( "r_vertexBufferMegs", "64" /*BC was 32
 
 idVertexCache		vertexCache;
 
+#ifdef ID_GL_CORE_PROFILE
+extern GLuint rb_scratchIndexBuffer;	// tr_render.cpp
+#endif
+
 /*
 ==============
 R_ListVertexCache_f
@@ -158,6 +162,29 @@ void idVertexCache::Init() {
 	}
 
 	virtualMemory = false;
+
+#ifdef ID_GL_CORE_PROFILE
+	{
+		// A core profile has no default vertex array object and refuses to
+		// draw from client memory. One VAO that stays bound for the life of
+		// the context gives the old "global attribute state" behaviour back;
+		// vertex data always comes from buffer objects (r_useVertexBuffers is
+		// not optional here) and indexes without an index cache are streamed
+		// through a scratch element buffer (see RB_DrawClientIndexes).
+		typedef void ( APIENTRY *genVertexArrays_t )( GLsizei n, GLuint *arrays );
+		typedef void ( APIENTRY *bindVertexArray_t )( GLuint array );
+		genVertexArrays_t genVertexArrays = (genVertexArrays_t)GLimp_ExtensionPointer( "glGenVertexArrays" );
+		bindVertexArray_t bindVertexArray = (bindVertexArray_t)GLimp_ExtensionPointer( "glBindVertexArray" );
+		if ( !genVertexArrays || !bindVertexArray ) {
+			common->FatalError( "idVertexCache::Init: no vertex array objects" );
+		}
+		GLuint vao = 0;
+		genVertexArrays( 1, &vao );
+		bindVertexArray( vao );
+		rb_scratchIndexBuffer = 0;
+		r_useVertexBuffers.SetInteger( 1 );
+	}
+#endif
 
 	// use ARB_vertex_buffer_object unless explicitly disabled
 	if( r_useVertexBuffers.GetInteger() && glConfig.ARBVertexBufferObjectAvailable ) {

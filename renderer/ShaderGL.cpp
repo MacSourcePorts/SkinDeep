@@ -12,6 +12,166 @@
 #include "framework/Common.h"
 #include "tr_local.h"
 
+#ifdef ID_GL_CORE_PROFILE
+#include <regex>
+#include <vector>
+
+/*
+macOS only has GLSL 4.10. The game's shaders are written against 4.20
+(GL_ARB_shading_language_420pack), but the only thing they need from it is
+layout(binding = N) on samplers and uniform blocks. Rewrite the source at load
+time: force "#version 410 core", drop the 420pack #extension line, strip the
+binding qualifiers, and remember them so the bindings can be applied by hand
+once the program is linked. Line numbers are preserved so compile errors still
+point at the right place.
+*/
+struct glslBinding_t {
+	std::string	name;
+	int			binding;
+	bool		isBlock;
+};
+static std::vector<glslBinding_t> pendingBindings;
+
+static bool IsIdentChar( char c ) {
+	return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_';
+}
+
+static void R_GLSL_RewriteForCoreProfile( std::string &src ) {
+	// pass 1: preprocessor lines
+	{
+		std::string out;
+		out.reserve( src.size() + 32 );
+		bool haveVersion = false;
+		size_t pos = 0;
+		while ( pos < src.size() ) {
+			size_t eol = src.find( '\n', pos );
+			if ( eol == std::string::npos ) {
+				eol = src.size();
+			}
+			std::string line = src.substr( pos, eol - pos );
+			size_t first = line.find_first_not_of( " \t" );
+			if ( first != std::string::npos && line[first] == '#' ) {
+				size_t word = line.find_first_not_of( " \t", first + 1 );
+				if ( word != std::string::npos && line.compare( word, 7, "version" ) == 0 ) {
+					line = "#version 410 core";
+					haveVersion = true;
+				} else if ( word != std::string::npos && line.compare( word, 9, "extension" ) == 0
+							&& line.find( "GL_ARB_shading_language_420pack" ) != std::string::npos ) {
+					line.clear();
+				}
+			}
+			out += line;
+			if ( eol < src.size() ) {
+				out += '\n';
+			}
+			pos = eol + 1;
+		}
+		if ( !haveVersion ) {
+			out = "#version 410 core\n#line 1\n" + out;
+		}
+		src.swap( out );
+	}
+
+	// pass 2: layout( ..., binding = N, ... )
+	static const std::regex layoutRe( "layout\\s*\\(([^)]*)\\)" );
+	static const std::regex bindingRe( "^\\s*binding\\s*=\\s*([0-9]+)\\s*$" );
+
+	std::string out;
+	out.reserve( src.size() );
+	size_t last = 0;
+	for ( std::sregex_iterator it( src.begin(), src.end(), layoutRe ), end; it != end; ++it ) {
+		const std::smatch &m = *it;
+		std::string qualifiers = m[1].str();
+		std::string kept;
+		int binding = -1;
+
+		size_t qpos = 0;
+		while ( qpos <= qualifiers.size() ) {
+			size_t comma = qualifiers.find( ',', qpos );
+			if ( comma == std::string::npos ) {
+				comma = qualifiers.size();
+			}
+			std::string q = qualifiers.substr( qpos, comma - qpos );
+			std::smatch bm;
+			if ( std::regex_match( q, bm, bindingRe ) ) {
+				binding = atoi( bm[1].str().c_str() );
+			} else if ( q.find_first_not_of( " \t\r\n" ) != std::string::npos ) {
+				if ( !kept.empty() ) {
+					kept += ',';
+				}
+				kept += q;
+			}
+			qpos = comma + 1;
+		}
+
+		if ( binding < 0 ) {
+			continue;	// nothing to rewrite, leave it alone
+		}
+
+		size_t start = (size_t)m.position( 0 );
+		size_t stop = start + (size_t)m.length( 0 );
+
+		// find out what is being declared: "uniform <type> <name>;" or "uniform <BlockName> {"
+		size_t term = src.find_first_of( ";{", stop );
+		if ( term != std::string::npos ) {
+			glslBinding_t b;
+			b.binding = binding;
+			b.isBlock = src[term] == '{';
+			size_t e = term;
+			if ( !b.isBlock ) {
+				// skip an array suffix
+				size_t bracket = src.rfind( '[', term );
+				if ( bracket != std::string::npos && bracket > stop ) {
+					e = bracket;
+				}
+			}
+			while ( e > stop && !IsIdentChar( src[e - 1] ) ) {
+				e--;
+			}
+			size_t s = e;
+			while ( s > stop && IsIdentChar( src[s - 1] ) ) {
+				s--;
+			}
+			if ( e > s ) {
+				b.name = src.substr( s, e - s );
+				pendingBindings.push_back( b );
+			}
+		}
+
+		out.append( src, last, start - last );
+		std::string replacement = kept.empty() ? std::string() : ( "layout(" + kept + ")" );
+		// keep newlines that were inside the qualifier list so line numbers don't shift
+		for ( size_t i = start; i < stop; i++ ) {
+			if ( src[i] == '\n' ) {
+				replacement += '\n';
+			}
+		}
+		out += replacement;
+		last = stop;
+	}
+	out.append( src, last, std::string::npos );
+	src.swap( out );
+}
+
+static void R_GLSL_ApplyBindings( GLuint program ) {
+	for ( size_t i = 0; i < pendingBindings.size(); i++ ) {
+		const glslBinding_t &b = pendingBindings[i];
+		if ( b.isBlock ) {
+			GLuint index = qglGetUniformBlockIndex( program, b.name.c_str() );
+			if ( index != GL_INVALID_INDEX ) {
+				qglUniformBlockBinding( program, index, b.binding );
+			}
+		} else {
+			GLint loc = qglGetUniformLocation( program, b.name.c_str() );
+			if ( loc != -1 ) {
+				qglUniform1i( loc, b.binding );
+			}
+		}
+	}
+	pendingBindings.clear();
+}
+#endif
+
 idShaderGL::idShaderGL()
 	: mShaderProgram(0)
 	, mVertexShader(0)
@@ -33,6 +193,9 @@ bool idShaderGL::LoadCombined(const idStr& prefix)
 
 bool idShaderGL::Load(const idStr& vertName, const idStr& fragName)
 {
+#ifdef ID_GL_CORE_PROFILE
+	pendingBindings.clear();
+#endif
 	// Compile vertex and pixel shaders
 	if (!CompileShader(vertName,
 					   GL_VERTEX_SHADER,
@@ -69,6 +232,9 @@ bool idShaderGL::Load(const idStr& vertName, const idStr& fragName)
 #endif
 
 	SetActive();
+#ifdef ID_GL_CORE_PROFILE
+	R_GLSL_ApplyBindings( mShaderProgram );
+#endif
 	SetupUniforms();
 
 	return true;
@@ -185,6 +351,9 @@ bool idShaderGL::CompileShader(const idStr& fileName,
 	std::string contents = readFile( fileName.c_str() );
 	if (!contents.empty())
 	{
+#ifdef ID_GL_CORE_PROFILE
+		R_GLSL_RewriteForCoreProfile( contents );
+#endif
 		const char* contentsChar = contents.c_str();
 		
 		// Create a shader of the specified type

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.5...3.28)
 project(dhewm3)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -146,7 +146,7 @@ else()
 endif()
 
 # compiler specific flags
-if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
+if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID MATCHES "Clang")
 	add_compile_options(-pipe)
 	add_compile_options(-Wall)
 
@@ -194,8 +194,15 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
 		add_definitions(-DIOAPI_NO_64)
 	elseif(APPLE)
 		add_definitions(-DMACOS_X=1)
+		# no Steamworks SDK on macOS
+		add_definitions(-DNOSTEAM)
+		# Apple only offers OpenGL 4.1 in a core profile context
+		add_definitions(-DID_GL_CORE_PROFILE=1)
 
-		if(cpu STREQUAL "x86_64")
+		if(CMAKE_OSX_ARCHITECTURES OR cpu MATCHES "arm64|aarch64")
+			# modern macOS: architecture and deployment target come from
+			# CMAKE_OSX_ARCHITECTURES / CMAKE_OSX_DEPLOYMENT_TARGET
+		elseif(cpu STREQUAL "x86_64")
 			add_compile_options(-arch x86_64 -mmacosx-version-min=10.6)
 			set(ldflags "${ldflags} -arch x86_64 -mmacosx-version-min=10.6")
 		elseif(cpu STREQUAL "x86")
@@ -221,6 +228,8 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
 		endif()
 
 		set(sys_libs ${sys_libs} "-framework Carbon -framework Cocoa -framework IOKit")
+		# the game dylib resolves a handful of engine symbols from the executable at load time
+		set(game_ldflags "-undefined dynamic_lookup")
 	elseif(WIN32)
 		set(ldflags "${ldflags} -static-libgcc -static-libstdc++")
 	elseif(os STREQUAL "linux")
@@ -975,7 +984,7 @@ if(D3XP)
 	set_target_properties(d3xp PROPERTIES PREFIX "")
 	set_target_properties(d3xp PROPERTIES COMPILE_DEFINITIONS "GAME_DLL;_D3XP;CTF")
 	set_target_properties(d3xp PROPERTIES COMPILE_FLAGS "-I${CMAKE_SOURCE_DIR}/d3xp")
-	set_target_properties(d3xp PROPERTIES LINK_FLAGS "${ldflags}")
+	set_target_properties(d3xp PROPERTIES LINK_FLAGS "${ldflags} ${game_ldflags}")
 	set_target_properties(d3xp PROPERTIES INSTALL_NAME_DIR "@executable_path")
 	if (AROS)
 		target_link_libraries(d3xp idlib dll)

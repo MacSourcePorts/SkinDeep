@@ -741,7 +741,13 @@ int idDeclFile::LoadAndParse() {
 			if ( newDecl->sourceFile != this || newDecl->redefinedInReload )
 			{
 				//BC this used to be a src.warning but I'm changing it to Error to make it stop the game.
+#if defined(_WIN32)
 				common->Error( "%s '%s' previously defined at %s:%i", declManagerLocal.GetDeclNameFromType( identifiedType ), name.c_str(), newDecl->sourceFile->fileName.c_str(), newDecl->sourceLine );
+#else
+				// Ports: keep the first definition and carry on, as stock idTech4 does,
+				// and say where both definitions are so the clash can be tracked down.
+				src.Warning( "%s '%s' previously defined at %s:%i, ignoring this definition", declManagerLocal.GetDeclNameFromType( identifiedType ), name.c_str(), newDecl->sourceFile->fileName.c_str(), newDecl->sourceLine );
+#endif
 				continue;
 			}
 			if ( newDecl->declState != DS_UNPARSED ) {

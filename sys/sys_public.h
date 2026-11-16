@@ -270,8 +270,8 @@ void			Sys_EndJoystickInputEvents();
 controllerType_t	Sys_GetLastControllerType();
 
 // blendo eric: set current sdl rumble/light, updated once every frame elsewhere
-void			Sys_SetGamepadRumble( float pctLowFreq = 0.0f, float pctHighFreq = 0.0f, float pctLeftTrigger = 0.0f, float pctRightTrigger = 0.0f );
-void			Sys_SetGamepadLED( float lightRed, float lightGreen, float lightBlue );
+ID_ENGINE_API void	Sys_SetGamepadRumble( float pctLowFreq = 0.0f, float pctHighFreq = 0.0f, float pctLeftTrigger = 0.0f, float pctRightTrigger = 0.0f );
+ID_ENGINE_API void	Sys_SetGamepadLED( float lightRed, float lightGreen, float lightBlue );
 
 // when the console is down, or the game is about to perform a lengthy
 // operation like map loading, the system can release the mouse cursor
@@ -283,7 +283,7 @@ bool			Sys_IsWindowVisible( void );
 void			Sys_ShowConsole( int visLevel, bool quitOnClose );
 
 // blendo eric: is window in focus
-bool			Sys_IsWindowActive();
+ID_ENGINE_API bool	Sys_IsWindowActive();
 
 enum SYS_ACCESS_MODE {
 	SYS_ACCESS_EXISTENCE = 0,

@@ -217,6 +217,24 @@ SelectInternalFormat
 This may need to scan six cube map images
 ===============
 */
+// The luminance / intensity / alpha / palette formats don't exist in a core
+// profile. Uploads always hand GL full RGBA data, and the compact formats are
+// only chosen when the channels they drop are redundant, so RGBA8 samples
+// identically; it just costs more memory.
+static GLenum R_CoreInternalFormat( GLenum internalFormat ) {
+#ifdef ID_GL_CORE_PROFILE
+	switch ( internalFormat ) {
+	case GL_INTENSITY8:
+	case GL_LUMINANCE8:
+	case GL_LUMINANCE8_ALPHA8:
+	case GL_ALPHA8:
+	case GL_COLOR_INDEX8_EXT:
+		return GL_RGBA8;
+	}
+#endif
+	return internalFormat;
+}
+
 GLenum idImage::SelectInternalFormat( const byte **dataPtrs, int numDataPtrs, int width, int height,
 									 textureDepth_t minimumDepth ) const {
 	int		i, c;
@@ -562,7 +580,7 @@ void idImage::GenerateImage( const byte *pic, int width, int height,
 	qglGenTextures( 1, &texnum );
 
 	// select proper internal format before we resample
-	internalFormat = SelectInternalFormat( &pic, 1, width, height, depth );
+	internalFormat = R_CoreInternalFormat( SelectInternalFormat( &pic, 1, width, height, depth ) );
 	// SM: Rather than hardcoding GL_RGBA use this data format variable
 	int dataFormat = GL_RGBA;
 	if ( internalFormat == GL_DEPTH_COMPONENT )
@@ -777,7 +795,7 @@ void idImage::Generate3DImage( const byte *pic, int width, int height, int picDe
 
 	// select proper internal format before we resample
 	// this function doesn't need to know it is 3D, so just make it very "tall"
-	internalFormat = SelectInternalFormat( &pic, 1, width, height * picDepth, minDepthParm );
+	internalFormat = R_CoreInternalFormat( SelectInternalFormat( &pic, 1, width, height * picDepth, minDepthParm ) );
 
 	uploadHeight = scaled_height;
 	uploadWidth = scaled_width;
@@ -911,7 +929,7 @@ void idImage::GenerateCubeImage( const byte *pic[6], int size,
 	qglGenTextures( 1, &texnum );
 
 	// select proper internal format before we resample
-	internalFormat = SelectInternalFormat( pic, 6, width, height, depth );
+	internalFormat = R_CoreInternalFormat( SelectInternalFormat( pic, 6, width, height, depth ) );
 
 	// don't bother with downsample for now
 	scaled_width = width;
@@ -1513,8 +1531,14 @@ void idImage::UploadPrecompressedImage( byte *data, int len ) {
 			internalFormat = GL_RGB8;
 		}
 	} else if ( header->ddspf.dwRGBBitCount == 8 ) {
+#ifdef ID_GL_CORE_PROFILE
+		// no GL_ALPHA8 in a core profile: single channel texture swizzled to 0,0,0,A
+		externalFormat = GL_RED;
+		internalFormat = GL_R8;
+#else
 		externalFormat = GL_ALPHA;
 		internalFormat = GL_ALPHA8;
+#endif
 	} else {
 		common->Warning( "Invalid uncompressed internal format\n" );
 		return;
@@ -1523,6 +1547,13 @@ void idImage::UploadPrecompressedImage( byte *data, int len ) {
 	type = TT_2D;			// FIXME: we may want to support pre-compressed cube maps in the future
 
 	Bind();
+
+#ifdef ID_GL_CORE_PROFILE
+	if ( internalFormat == GL_R8 ) {
+		static const GLint alphaSwizzle[4] = { GL_ZERO, GL_ZERO, GL_ZERO, GL_RED };
+		qglTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, alphaSwizzle );
+	}
+#endif
 
 	int numMipmaps = 1;
 	if ( header->dwFlags & DDSF_MIPMAPCOUNT ) {

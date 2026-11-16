@@ -2739,7 +2739,12 @@ idCommonLocal::InitSIMD
 void idCommonLocal::InitSIMD( void ) {
 
 	//3-25-2025: when we initialize OpenGL it calls wglChoosePixelFormat which ultimately calls some functions in the dll that do require SSE 4.1
+	// (only meaningful on x86; ARM builds have no SSE at all)
+#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
 	if (SDL_HasSSE41() == SDL_FALSE)
+#else
+	if (false)
+#endif
 	{
 		idStr errorMsg = idStr::Format("Skin Deep requires a CPU that supports SSE4.1 or higher.\n\n- Please ensure your CPU supports SSE4.1 or higher.\n- If your computer has multiple video cards, please ensure it is using its dedicated video card (not the integrated video card).\n\nExiting now.");
 		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Fatal Error", errorMsg.c_str(), NULL);

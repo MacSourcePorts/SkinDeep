@@ -437,14 +437,23 @@ static void R_CheckPortableExtensions( void ) {
 		qglMultiTexCoord2fvARB = (void(APIENTRY *)(GLenum, GLfloat *))GLimp_ExtensionPointer( "glMultiTexCoord2fvARB" );
 		qglActiveTextureARB = (void(APIENTRY *)(GLenum))GLimp_ExtensionPointer( "glActiveTextureARB" );
 		qglClientActiveTextureARB = (void(APIENTRY *)(GLenum))GLimp_ExtensionPointer( "glClientActiveTextureARB" );
+#ifdef ID_GL_CORE_PROFILE
+		// the fixed-function unit limits can't be queried in a core profile
+		qglGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS_ARB, (GLint *)&glConfig.maxTextureUnits );
+#else
 		qglGetIntegerv( GL_MAX_TEXTURE_UNITS_ARB, (GLint *)&glConfig.maxTextureUnits );
+#endif
 		if ( glConfig.maxTextureUnits > MAX_MULTITEXTURE_UNITS ) {
 			glConfig.maxTextureUnits = MAX_MULTITEXTURE_UNITS;
 		}
 		if ( glConfig.maxTextureUnits < 2 ) {
 			glConfig.multitextureAvailable = false;	// shouldn't ever happen
 		}
+#ifdef ID_GL_CORE_PROFILE
+		glConfig.maxTextureCoords = glConfig.maxTextureUnits;
+#else
 		qglGetIntegerv( GL_MAX_TEXTURE_COORDS_ARB, (GLint *)&glConfig.maxTextureCoords );
+#endif
 		qglGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS_ARB, (GLint *)&glConfig.maxTextureImageUnits );
 	}
 
@@ -676,7 +685,14 @@ static void R_CheckPortableExtensions( void ) {
 		glConfig.isBrokenAMDR7200 = glConfig.isBrokenAMDR7200 || gpuStr.Find(amdGPUs[i]) != -1;
 	}
 
-	if (!R_CheckExtension("GL_ARB_texture_float") || !glConfig.GLSLAvailable || !R_CheckExtension("GL_ARB_shading_language_420pack"))
+#ifdef ID_GL_CORE_PROFILE
+	// 420pack is only used for layout(binding = N) on samplers, which the
+	// shader loader rewrites into plain uniforms (see ShaderGL.cpp)
+	const bool have420pack = true;
+#else
+	const bool have420pack = R_CheckExtension("GL_ARB_shading_language_420pack");
+#endif
+	if (!R_CheckExtension("GL_ARB_texture_float") || !glConfig.GLSLAvailable || !have420pack)
 	{
 		idStr errorMessage = "Skin Deep requires a graphics card that supports DirectX 11_0 feature level or higher.\n";
 		errorMessage += idStr::Format("Your video card is: %s\n\n", glConfig.renderer_string);
@@ -687,7 +703,7 @@ static void R_CheckPortableExtensions( void ) {
 		if (!glConfig.GLSLAvailable)
 			errorMessage += "- Your video card doesn't support GLSL\n";
 
-		if (!R_CheckExtension("GL_ARB_shading_language_420pack"))
+		if (!have420pack)
 			errorMessage += "- Your video card doesn't support GL_ARB_shading_language_420pack\n";
 
 		errorMessage += "\nExiting now.";
@@ -1077,7 +1093,35 @@ void R_InitOpenGL( void ) {
 	}
 
 	glConfig.version_string = (const char *)qglGetString(GL_VERSION);
+#ifdef ID_GL_CORE_PROFILE
+	{
+		// glGetString( GL_EXTENSIONS ) is gone in a core profile, so build the
+		// string from glGetStringi. The old ARB/EXT extensions the renderer
+		// checks for are core functionality here and no longer advertised;
+		// list them so the existing checks keep working.
+		static idStr coreExtensions;
+		coreExtensions.Clear();
+
+		typedef const GLubyte *( APIENTRY *getStringi_t )( GLenum name, GLuint index );
+		getStringi_t getStringi = (getStringi_t)GLimp_ExtensionPointer( "glGetStringi" );
+		GLint numExtensions = 0;
+		qglGetIntegerv( GL_NUM_EXTENSIONS, &numExtensions );
+		for ( int i = 0; getStringi && i < numExtensions; i++ ) {
+			coreExtensions += (const char *)getStringi( GL_EXTENSIONS, i );
+			coreExtensions += " ";
+		}
+		coreExtensions += "GL_ARB_multitexture GL_ARB_texture_env_combine GL_ARB_texture_cube_map "
+			"GL_ARB_texture_env_dot3 GL_ARB_texture_env_add GL_ARB_texture_non_power_of_two "
+			"GL_ARB_texture_compression GL_ARB_vertex_buffer_object GL_EXT_texture3D "
+			"GL_EXT_stencil_wrap GL_ARB_texture_float "
+			// the assembly programs are all GLSL now, but material scripts and a
+			// couple of backend paths still key off these flags
+			"GL_ARB_vertex_program GL_ARB_fragment_program";
+		glConfig.extensions_string = coreExtensions.c_str();
+	}
+#else
 	glConfig.extensions_string = (const char *)qglGetString(GL_EXTENSIONS);
+#endif
 
 	// OpenGL driver constants
 	qglGetIntegerv( GL_MAX_TEXTURE_SIZE, &temp );

@@ -105,7 +105,16 @@ bool GLimp_Init(glimpParms_t parms) {
 
 	assert(SDL_WasInit(SDL_INIT_VIDEO));
 
+#ifdef MACOS_X
+	// On a Retina display ALLOW_HIGHDPI makes the drawable twice the window
+	// size in each direction, but the renderer sizes everything (framebuffers,
+	// viewport, the final blit) from the window size in points, so the game
+	// ended up in one quarter of the window. Until render size and window size
+	// are tracked separately, ask for a 1x drawable and let macOS scale it.
+	Uint32 flags = SDL_WINDOW_OPENGL;
+#else
 	Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
 
 	if (parms.fullScreen)
 		flags |= SDL_WINDOW_FULLSCREEN;
@@ -195,11 +204,20 @@ bool GLimp_Init(glimpParms_t parms) {
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, parms.multiSamples ? 1 : 0);
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, parms.multiSamples);
 
+#if defined(ID_GL_CORE_PROFILE) && SDL_VERSION_ATLEAST(2, 0, 0)
+		// macOS: the only way to get anything newer than GL 2.1 is a forward
+		// compatible core profile context, which tops out at 4.1
+		SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 4 );
+		SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 1 );
+		SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
+		SDL_GL_SetAttribute( SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG );
+#else
 		// SM: Option to create a debug context
 #ifdef _DEBUG
 		if ( r_debugGLContext.GetBool() ) {
 			SDL_GL_SetAttribute( SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG );
 		}
+#endif
 #endif
 
 #if SDL_VERSION_ATLEAST(2, 0, 0)
@@ -403,8 +421,143 @@ void GLimp_DeactivateContext() {
 GLimp_ExtensionPointer
 ===================
 */
+#ifdef ID_GL_CORE_PROFILE
+/*
+The renderer draws everything through GLSL, but it still makes a lot of
+fixed-function calls (matrix stack, client state, alpha test, texgen, ARB
+assembly program parameters, immediate mode debug drawing) whose results
+nothing depends on anymore. A core profile context rejects all of them with
+GL_INVALID_OPERATION, so hand out no-ops instead, and filter the few calls
+that are still valid but get passed legacy enums.
+*/
+static void GLimp_NoOp( void ) {
+}
+
+static bool GLimp_IsLegacyFunction( const char *name ) {
+	static const char *exact[] = {
+		"glBegin", "glEnd", "glMatrixMode", "glLoadIdentity", "glPushMatrix", "glPopMatrix",
+		"glOrtho", "glFrustum", "glEnableClientState", "glDisableClientState",
+		"glVertexPointer", "glColorPointer", "glNormalPointer", "glTexCoordPointer",
+		"glIndexPointer", "glEdgeFlagPointer", "glInterleavedArrays", "glArrayElement",
+		"glAlphaFunc", "glShadeModel", "glPushAttrib", "glPopAttrib",
+		"glPushClientAttrib", "glPopClientAttrib", "glDrawPixels", "glCopyPixels",
+		"glBitmap", "glPixelZoom", "glLineStipple", "glPolygonStipple", "glColorMaterial",
+		"glClipPlane", "glAccum", "glClearAccum", "glClearIndex", "glIndexMask",
+		"glNewList", "glEndList", "glCallList", "glCallLists", "glDeleteLists", "glListBase",
+		"glClientActiveTexture", "glClientActiveTextureARB",
+		"glPrioritizeTextures", "glAreTexturesResident",
+		"glProgramStringARB", "glBindProgramARB", "glGenProgramsARB", "glGetProgramivARB",
+		"glProgramEnvParameter4fvARB", "glProgramLocalParameter4fvARB",
+		"glColorTableEXT", "glActiveStencilFaceEXT",
+		NULL
+	};
+	static const char *prefix[] = {
+		"glColor3", "glColor4", "glVertex2", "glVertex3", "glVertex4",
+		"glTexCoord1", "glTexCoord2", "glTexCoord3", "glTexCoord4", "glNormal3",
+		"glMultiTexCoord", "glLoadMatrix", "glMultMatrix", "glRotate", "glScale", "glTranslate",
+		"glTexEnv", "glTexGen", "glRasterPos", "glRect", "glLight", "glMaterial", "glFog",
+		"glPixelTransfer", "glPixelMap", "glEvalCoord", "glEvalMesh", "glEvalPoint",
+		"glMap1", "glMap2", "glMapGrid", "glIndex", "glEdgeFlag",
+		NULL
+	};
+	for ( int i = 0; exact[i]; i++ ) {
+		if ( !idStr::Cmp( name, exact[i] ) ) {
+			return true;
+		}
+	}
+	for ( int i = 0; prefix[i]; i++ ) {
+		if ( !idStr::Cmpn( name, prefix[i], strlen( prefix[i] ) ) ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void ( APIENTRY *real_glEnable )( GLenum cap );
+static void ( APIENTRY *real_glDisable )( GLenum cap );
+static void ( APIENTRY *real_glTexParameteri )( GLenum target, GLenum pname, GLint param );
+static void ( APIENTRY *real_glTexParameterf )( GLenum target, GLenum pname, GLfloat param );
+static void ( APIENTRY *real_glLineWidth )( GLfloat width );
+
+static bool GLimp_IsLegacyCap( GLenum cap ) {
+	switch ( cap ) {
+	case GL_ALPHA_TEST:
+	case GL_LIGHTING:
+	case GL_FOG:
+	case GL_COLOR_MATERIAL:
+	case GL_NORMALIZE:
+	case GL_LINE_STIPPLE:
+	case GL_POLYGON_STIPPLE:
+	case GL_TEXTURE_1D:
+	case GL_TEXTURE_2D:
+	case GL_TEXTURE_3D:
+	case GL_TEXTURE_CUBE_MAP:
+	case GL_TEXTURE_GEN_S:
+	case GL_TEXTURE_GEN_T:
+	case GL_TEXTURE_GEN_R:
+	case GL_TEXTURE_GEN_Q:
+	case GL_VERTEX_PROGRAM_ARB:
+	case GL_FRAGMENT_PROGRAM_ARB:
+	case GL_STENCIL_TEST_TWO_SIDE_EXT:
+		return true;
+	}
+	return false;
+}
+
+static void APIENTRY core_glEnable( GLenum cap ) {
+	if ( !GLimp_IsLegacyCap( cap ) ) {
+		real_glEnable( cap );
+	}
+}
+
+static void APIENTRY core_glDisable( GLenum cap ) {
+	if ( !GLimp_IsLegacyCap( cap ) ) {
+		real_glDisable( cap );
+	}
+}
+
+// GL_CLAMP is gone; edge clamping is what the shaders effectively got anyway
+// since nothing uses texture borders
+static void APIENTRY core_glTexParameteri( GLenum target, GLenum pname, GLint param ) {
+	if ( param == GL_CLAMP && ( pname == GL_TEXTURE_WRAP_S || pname == GL_TEXTURE_WRAP_T || pname == GL_TEXTURE_WRAP_R ) ) {
+		param = GL_CLAMP_TO_EDGE;
+	}
+	real_glTexParameteri( target, pname, param );
+}
+
+static void APIENTRY core_glTexParameterf( GLenum target, GLenum pname, GLfloat param ) {
+	if ( param == (GLfloat)GL_CLAMP && ( pname == GL_TEXTURE_WRAP_S || pname == GL_TEXTURE_WRAP_T || pname == GL_TEXTURE_WRAP_R ) ) {
+		param = (GLfloat)GL_CLAMP_TO_EDGE;
+	}
+	real_glTexParameterf( target, pname, param );
+}
+
+// wide lines are an error in a forward compatible context
+static void APIENTRY core_glLineWidth( GLfloat width ) {
+	real_glLineWidth( width > 1.0f ? 1.0f : width );
+}
+#endif
+
 GLExtension_t GLimp_ExtensionPointer(const char *name) {
 	assert(SDL_WasInit(SDL_INIT_VIDEO));
+
+#ifdef ID_GL_CORE_PROFILE
+	if ( GLimp_IsLegacyFunction( name ) ) {
+		return (GLExtension_t)GLimp_NoOp;
+	}
+
+#define CORE_WRAP( fn ) \
+	if ( !idStr::Cmp( name, #fn ) ) { \
+		*(void **)&real_##fn = SDL_GL_GetProcAddress( name ); \
+		return real_##fn ? (GLExtension_t)core_##fn : NULL; \
+	}
+	CORE_WRAP( glEnable )
+	CORE_WRAP( glDisable )
+	CORE_WRAP( glTexParameteri )
+	CORE_WRAP( glTexParameterf )
+	CORE_WRAP( glLineWidth )
+#undef CORE_WRAP
+#endif
 
 	return (GLExtension_t)SDL_GL_GetProcAddress(name);
 }

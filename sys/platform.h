@@ -32,6 +32,15 @@ If you have questions concerning this license or the applicable additional terms
 #include "config.h"
 #include "framework/BuildDefines.h"
 
+// Engine functions the game library calls directly (not through the import
+// table). Everything is built with -fvisibility=hidden, so these have to be
+// exported from the executable for the game dylib to find them at load time.
+#if defined(_WIN32)
+#define ID_ENGINE_API
+#else
+#define ID_ENGINE_API					__attribute__((visibility ("default")))
+#endif
+
 
 
 /*

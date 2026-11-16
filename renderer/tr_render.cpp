@@ -71,6 +71,31 @@ void RB_DrawElementsImmediate( const srfTriangles_t *tri ) {
 }
 
 
+#ifdef ID_GL_CORE_PROFILE
+/*
+================
+RB_DrawClientIndexes
+
+A core profile can't draw with indexes in client memory. Surfaces that have no
+index cache (or when r_useIndexBuffers is off, which is the default) get their
+indexes streamed through one scratch element buffer instead.
+================
+*/
+GLuint rb_scratchIndexBuffer = 0;
+
+static void RB_DrawClientIndexes( int numIndexes, const glIndex_t *indexes ) {
+	if ( numIndexes <= 0 ) {
+		return;
+	}
+	if ( !rb_scratchIndexBuffer ) {
+		qglGenBuffers( 1, &rb_scratchIndexBuffer );
+	}
+	qglBindBuffer( GL_ELEMENT_ARRAY_BUFFER, rb_scratchIndexBuffer );
+	qglBufferData( GL_ELEMENT_ARRAY_BUFFER, numIndexes * sizeof( glIndex_t ), indexes, GL_STREAM_DRAW );
+	qglDrawElements( GL_TRIANGLES, numIndexes, GL_INDEX_TYPE, NULL );
+}
+#endif
+
 /*
 ================
 RB_DrawElementsWithCounters
@@ -103,6 +128,9 @@ void RB_DrawElementsWithCounters( const srfTriangles_t *tri ) {
 						(int *)vertexCache.Position( tri->indexCache ) );
 		backEnd.pc.c_vboIndexes += tri->numIndexes;
 	} else {
+#ifdef ID_GL_CORE_PROFILE
+		RB_DrawClientIndexes( triCount, tri->indexes );
+#else
 		if ( r_useIndexBuffers.GetBool() ) {
 			vertexCache.UnbindIndex();
 		}
@@ -110,6 +138,7 @@ void RB_DrawElementsWithCounters( const srfTriangles_t *tri ) {
 						triCount,
 						GL_INDEX_TYPE,
 						tri->indexes );
+#endif
 	}
 }
 
@@ -137,6 +166,9 @@ void RB_DrawShadowElementsWithCounters( const srfTriangles_t *tri, int numIndexe
 						(int *)vertexCache.Position( tri->indexCache ) );
 		backEnd.pc.c_vboIndexes += numIndexes;
 	} else {
+#ifdef ID_GL_CORE_PROFILE
+		RB_DrawClientIndexes( triCount, tri->indexes );
+#else
 		if ( r_useIndexBuffers.GetBool() ) {
 			vertexCache.UnbindIndex();
 		}
@@ -144,6 +176,7 @@ void RB_DrawShadowElementsWithCounters( const srfTriangles_t *tri, int numIndexe
 						triCount,
 						GL_INDEX_TYPE,
 						tri->indexes );
+#endif
 	}
 }
 

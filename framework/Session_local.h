@@ -165,7 +165,7 @@ public:
 
 	int					GetLocalClientNum();
 
-	void				MoveToNewMap( const char *mapName );
+	ID_ENGINE_API void	MoveToNewMap( const char *mapName );
 
 	// loads a map and starts a new game on it
 	void				StartNewGame( const char *mapName, bool devmap = false );
@@ -363,7 +363,7 @@ public:
 	void				HandleRestartMenuCommands( const char *menuCommand );
 	void				HandleMsgCommands( const char *menuCommand );
 	void				HandleNoteCommands( const char *menuCommand );
-	void				GetSaveGameList( idStrList &fileList, idList<fileTIME_T> &fileTimes );
+	ID_ENGINE_API void	GetSaveGameList( idStrList &fileList, idList<fileTIME_T> &fileTimes );
 	void				GetSaveGameList( idList<LoadGameInfo_t> &fileList );
 	void				TakeNotes( const char * p, bool extended = false );
 	void				UpdateMPLevelShot( void );

@@ -254,7 +254,7 @@ void SG_DumpStack() {
 
 // FreeBSD clang is stricter about format attribute indices - for free functions
 // the format string is parameter 1, varargs start at 2
-#if defined(__FreeBSD__)
+#if defined(__FreeBSD__) || defined(__clang__)
 void SG_Warn( const char* fmt, ... ) id_attribute((format(printf,1,2)));
 #else
 void SG_Warn( const char* fmt, ... ) id_attribute((format(printf,2,3)));
@@ -277,7 +277,7 @@ void SG_Warn( const char* fmt, ... ) {
 	va_end(args);
 }
 
-#if defined(__FreeBSD__)
+#if defined(__FreeBSD__) || defined(__clang__)
 void SG_Error( const char *fmt, ... ) id_attribute((format(printf,1,2)));
 #else
 void SG_Error( const char *fmt, ... ) id_attribute((format(printf,2,3)));
@@ -299,7 +299,7 @@ void SG_Error( const char *fmt, ... ) {
 }
 
 
-#if defined(__FreeBSD__)
+#if defined(__FreeBSD__) || defined(__clang__)
 void SG_Print( const char *fmt, ... ) id_attribute((format(printf,1,2)));
 #else
 void SG_Print( const char *fmt, ... ) id_attribute((format(printf,2,3)));

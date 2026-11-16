@@ -299,7 +299,7 @@ const uint32 UNI_CANBREAK_ZEROSPACE_LIST[UNI_CANBREAK_ZEROSPACE_COUNT] = {
 };
 
 // blendo eric: special language characters that do not affect rendering
-bool UnicodeCharacterZeroSpace(uint32 ch) {
+ID_ENGINE_API bool UnicodeCharacterZeroSpace(uint32 ch) {
 	if (ch < UNI_CANBREAK_ZEROSPACE_LIST[0]) {
 		return false; // fast out, if it's below the first item
 	}
