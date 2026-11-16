@@ -37,6 +37,7 @@ If you have questions concerning this license or the applicable additional terms
 idCVar in_nograb("in_nograb", "0", CVAR_SYSTEM | CVAR_NOCHEAT, "prevents input grabbing");
 idCVar r_waylandcompat("r_waylandcompat", "0", CVAR_SYSTEM | CVAR_NOCHEAT | CVAR_ARCHIVE, "wayland compatible framebuffer");
 idCVar r_debugGLContext( "r_debugGLContext", "0", CVAR_SYSTEM | CVAR_NOCHEAT | CVAR_ARCHIVE | CVAR_BOOL, "Enable a debug OpenGL context" );
+idCVar r_highDPI( "r_highDPI", "1", CVAR_SYSTEM | CVAR_NOCHEAT | CVAR_ARCHIVE | CVAR_BOOL, "Render at the display's native pixel resolution on HiDPI/Retina displays (needs vid_restart)" );
 
 static bool grabbed = false;
 
@@ -105,16 +106,14 @@ bool GLimp_Init(glimpParms_t parms) {
 
 	assert(SDL_WasInit(SDL_INIT_VIDEO));
 
-#ifdef MACOS_X
-	// On a Retina display ALLOW_HIGHDPI makes the drawable twice the window
-	// size in each direction, but the renderer sizes everything (framebuffers,
-	// viewport, the final blit) from the window size in points, so the game
-	// ended up in one quarter of the window. Until render size and window size
-	// are tracked separately, ask for a 1x drawable and let macOS scale it.
+	// With ALLOW_HIGHDPI the drawable can be larger than the window (2x in
+	// each direction on a Retina display). glConfig.vidWidth/vidHeight are the
+	// size of the drawable in pixels, which is what the renderer wants; the
+	// window itself is sized in points from the requested resolution.
 	Uint32 flags = SDL_WINDOW_OPENGL;
-#else
-	Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI;
-#endif
+	if ( r_highDPI.GetBool() ) {
+		flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+	}
 
 	if (parms.fullScreen)
 		flags |= SDL_WINDOW_FULLSCREEN;
@@ -267,7 +266,7 @@ bool GLimp_Init(glimpParms_t parms) {
 			}
 		}
 
-		SDL_GetWindowSize(window, &glConfig.vidWidth, &glConfig.vidHeight);
+		SDL_GL_GetDrawableSize(window, &glConfig.vidWidth, &glConfig.vidHeight);
 
 		SetSDLIcon(); // for SDL2  this must be done after creating the window
 
@@ -330,8 +329,8 @@ bool GLimp_SetScreenParms(glimpParms_t parms) {
 	{
 		SDL_DisplayMode mode;
 		SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(window), &mode);
-		mode.w = glConfig.vidWidth;
-		mode.h = glConfig.vidHeight;
+		mode.w = parms.width;
+		mode.h = parms.height;
 		SDL_SetWindowDisplayMode(window, &mode);
 
 		SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
@@ -339,9 +338,13 @@ bool GLimp_SetScreenParms(glimpParms_t parms) {
 	else
 	{
 		SDL_SetWindowBordered(window,SDL_bool(!glConfig.isBorderless));
-		SDL_SetWindowSize(window, glConfig.vidWidth, glConfig.vidHeight);
+		SDL_SetWindowSize(window, parms.width, parms.height);
 		SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 	}
+
+	// the requested size is in window coordinates; what the renderer needs is
+	// the size of the drawable, which differs on a HiDPI display
+	SDL_GL_GetDrawableSize(window, &glConfig.vidWidth, &glConfig.vidHeight);
 	return true;
 }
 
