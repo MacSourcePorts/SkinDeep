@@ -33,7 +33,10 @@ endif()
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/sys/cmake")
 set(CMAKE_SKIP_RPATH ON CACHE BOOL "Skip RPATH" FORCE)
 
-set(DHEWM3BINARY "dhewm3")
+# name of the executable (and of the .app bundle on macOS); override with -DDHEWM3BINARY=...
+if(NOT DHEWM3BINARY)
+	set(DHEWM3BINARY "dhewm3")
+endif()
 
 include(CheckCXXCompilerFlag)
 include(GNUInstallDirs OPTIONAL RESULT_VARIABLE GNUINSTALLDIRS)
@@ -230,6 +233,8 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID MATCHES "Clang")
 		set(sys_libs ${sys_libs} "-framework Carbon -framework Cocoa -framework IOKit")
 		# the game dylib resolves a handful of engine symbols from the executable at load time
 		set(game_ldflags "-undefined dynamic_lookup")
+		# CMAKE_SKIP_RPATH is on, so say where bundled dylibs live explicitly
+		set(ldflags "${ldflags} -Wl,-rpath,@executable_path/../Frameworks")
 	elseif(WIN32)
 		set(ldflags "${ldflags} -static-libgcc -static-libstdc++")
 	elseif(os STREQUAL "linux")
